@@ -8,6 +8,9 @@ Blockchain 类用来管理链条，它能存储交易，加入新块等
 import hashlib
 import json
 from time import time
+from uuid import uuid4
+
+from flask import Flask, jsonify
 
 
 class Blockchain(object):
@@ -117,4 +120,56 @@ class Blockchain(object):
 
 
 
+"""
+为什么使用flask框架？
+    它可以方便的将网络请求映射到Python函数。
+    我们的flask服务器将扮演区块链网络中的一个节点。我们先添加一些框架代码
+"""
+"""
+接下来，创建三个接口：
+     /transactions/new ---->> POST接口，可以给接口发送交易数据。创建一个交易并添加到区块
+     /mine GET接口 ----->> 告诉服务器去挖掘新的区块
+     /chain ---->> 返回整个区块链
+"""
 
+
+"""
+创建节点：node
+"""
+app = Flask(__name__)
+
+# 为该节点生成全局唯一地址
+node_identifier = str(uuid4()).replace('-', '')
+
+blockchain = Blockchain()
+
+@app.route('/mine', methods=['GET'])
+def mine():
+    return "We'll mine a new Block"
+
+@app.route('/transactions/new', methods=['POST'])
+def new_transactions():
+    return "We'll add a new transaction"
+
+@app.route('/chain', methods=['GET'])
+def full_chain():
+    response = {
+        'chain': blockchain.chain,
+        'length': len(blockchain.chain),
+    }
+    return jsonify(response), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', post=5000)
+
+
+"""
+发送交易
+发送到节点的交易数据结构如下：
+
+{
+ "sender": "my address",
+ "recipient": "someone else's address",
+ "amount": 5
+}
+"""
