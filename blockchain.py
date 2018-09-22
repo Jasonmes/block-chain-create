@@ -8,9 +8,11 @@ Blockchain 类用来管理链条，它能存储交易，加入新块等
 import hashlib
 import json
 from time import time
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from flask import Flask, jsonify, request
+import requests
 
 
 class Blockchain(object):
@@ -20,13 +22,12 @@ class Blockchain(object):
             一个储存区块链
             一个储存交易
         """
+        self.chain = []
+        self.current_transactions = []
+        self.nodes = set()
 
-        def __init__(self):
-            self.chain = []
-            self.current_transaction = []
-
-            # create the genesis block
-            self.new_block(previous_hash=1, proof=100)
+        # create the genesis block
+        self.new_block(previous_hash=1, proof=100)
 
     """
     字典 -->> 块block结构包含索引index  时间戳timestamp   交易列表transactions   工作量证明proof   前一个区块的hash值
@@ -118,6 +119,74 @@ class Blockchain(object):
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
+    """
+    注册节点
+    """
+    def register_node(self, address):
+        """
+        添加一个新的节点到节点列表
+        :param address: <str> Address of node. Eg. 'http://192.168.0.5:5000'
+        :return: None
+        """
+        parse_url = urlparse(address)
+        self.nodes.add(parse_url.netloc)
+
+    def valid_chain(self, chain):
+        """
+        确定给定的 blockchain 是否有效
+        用来检查是否是有效链，遍历每个块验证hash和proof
+        :param chain:
+        :return:
+        """
+        last_block = chain[0]
+        current_index = 1
+
+        while current_index < len(chain):
+            block = chain[current_index]
+            print(f'{last_block}')
+            print(f'{block}')
+            print('\n------\n')
+            # 检查块的哈希值是否正确
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+
+            last_block = block
+            current_index += 1
+
+        return True
+
+    def resolve_conflicts(self):
+        """
+        共识算法解决冲突
+        使用网络中最长的链
+        用来解决冲突，遍历所有的邻居节点，
+        并用上一个方法检查链的有效性， 如果发现有效更长链，就替换掉自己的链
+        :return: <bool> True 如果链被取代，否则为False
+        """
+        neighbours = self.nodes
+        new_chain = None
+
+        # 我们只是在寻找比我们更长的锁链
+        max_length = len(self.chain)
+
+        # 抓取并验证网络中所有节点的链
+        for node in neighbours:
+            response = requests.get(f'http://{node}/chain')
+
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+            if length > max_length and self.valid_chain(chain):
+                max_length = length
+                new_chain =chain
+
+        # 更换我们的链条, 如果我们发现一个新的, 有效的, 比我们长的链
+        if new_chain:
+            self.chain = new_chain
+            return True
+
+        return False
 
 
 """
@@ -145,28 +214,42 @@ blockchain = Blockchain()
 
 @app.route('/mine', methods=['GET'])
 def mine():
-    return "We'll mine a new Block"
+    last_block = blockchain.last_block
+    last_proof = last_block['proof']
+    proof = blockchain.proof_of_work(last_proof)
+
+    # 给工作量证明的节点提供奖励
+    # 发送者为0，表明是新出的币
+    blockchain.new_transaction(
+        sender='0',
+        recipient=node_identifier,
+        amount=1,
+    )
+    previous_hash = blockchain.hash(last_block)
+    block = blockchain.new_block(proof, previous_hash)
+
+    response = {
+        'message': "New Block Forged",
+        'index': block['index'],
+        'transactions': block['transactions'],
+        'proof': block['proof'],
+        'previous_hash': block['previous_hash'],
+    }
+    return jsonify(response), 200
 
 @app.route('/transactions/new', methods=['POST'])
-def new_transactions():
-    """
-    添加交易
-    :return:
-    """
+def new_transaction():
     values = request.get_json()
-    required = ['sender',
-                'recipient',
-                'amount']
+
+    # Check that the required fields are in the POST'ed data
+    required = ['sender', 'recipient', 'amount']
     if not all(k in values for k in required):
         return 'Missing values', 400
 
-    # 创造一个新的交易
-    index = blockchain.new_transaction(values['sender'],
-                                       values['recipient'],
-                                       values['amount'])
-    response = {
-        'message': f'Transaction will be added to Block {index}'
-    }
+    # Create a new Transaction
+    index = blockchain.new_transaction(values['sender'], values['recipient'], values['amount'])
+
+    response = {'message': f'Transaction will be added to Block {index}'}
     return jsonify(response), 201
 
 
@@ -192,4 +275,31 @@ if __name__ == '__main__':
  "recipient": "someone else's address",
  "amount": 5
 }
+"""
+
+"""
+创建交易的方法：
+   挖矿：
+     1：计算工作量的证明PoW
+     2：通过新增一个交易授予矿工一个币
+     3：构造新区块并将其添加到链中
+"""
+
+"""
+post 
+{
+ "sender": "d4ee26eee15148ee92c6cd394edd974e",
+ "recipient": "someone-other-address",
+ "amount": 5
+}
+"""
+
+
+"""
+每个节点都需要保存一份包含网络中其它节点的记录
+实现共识算法
+前面提到，冲突是指不同的节点拥有不同的链，
+为了解决这个问题，规定最长的、有效的链才是最终的链，
+换句话说，网络中有效最长链才是实际的链。
+我们使用以下的算法，来达到网络中的共识。
 """
